@@ -42,17 +42,17 @@ everywhereWithContext cat q s0 =
       let (s', a') = everywhereWithContext cat q s a
       in (cat s' *** f) (q a')
 
-mkQT :: forall a b c. (Data b, Data c) => a -> (b -> (a, b)) -> c -> (a, c)
-mkQT a0 f c = case cast c of
-  Just b -> (fromJust . cast) <$> f b -- cast is only one deep, so it can only assert that `c ~ b_arg` for the arg type of `f`, but not that `c ~ b_ret` despite the type signature contract that `b_arg ~ b_ret`, which is why we have to do that kludge with a second cast
-  Nothing -> (a0, c)
+mkQT :: (Data b, Data c, Data (d b), Data (d c)) => (c -> d c) -> (b -> d b) -> c -> d c
+mkQT f0 f c = case cast c of
+  Just b -> fromJust $ cast $ f b -- cast is only one deep, so it can only assert that `c ~ b_arg` for the arg type of `f`, but not that `c ~ b_ret` despite the type signature contract that `b_arg ~ b_ret`, which is why we have to do that kludge with a second cast
+  Nothing -> f0 c
 
-extQT :: (Data b, Data c) => 
-  (b -> (a, b)) ->
-  (c -> (a, c)) ->
-  (b -> (a, b))
+extQT :: (Data b, Data c, Data (d b), Data (d c)) => 
+  (b -> d b) ->
+  (c -> d c) ->
+  (b -> d b)
 extQT f g a = case cast a of
-  Just c -> (fromJust . cast) <$> g c
+  Just c -> fromJust $ cast $ g c
   Nothing -> f a
 
 everywhereWithContextBut :: forall a s. Data a => (s -> s -> s) -> (forall b. Data b => b -> Maybe (s, b)) -> s -> a -> (s, a)
