@@ -8,7 +8,9 @@ module Data.Generics.Extra (
   everythingWithContext,
   mkQT,
   extQT,
+  everywhereWithContext,
   everywhereWithContextBut,
+  everywhereWithContextLazyBut,
   everywhereMBut
 ) where
 import Control.Applicative
@@ -55,6 +57,21 @@ extQT f g a = case cast a of
   Just c -> fromJust $ cast $ g c
   Nothing -> f a
 
+everywhereWithContextLazyBut ::
+  forall a s. Data a =>
+    (s -> s -> s) ->
+    GenericQ Bool ->
+    (forall b. Data b => b -> (s, b))
+    -> (s -> a -> (s, a))
+everywhereWithContextLazyBut cat p q s0 =
+  gfoldl k (s0,) where
+    k :: Data c => (s, c -> d) -> c -> (s, d)
+    k (s, f) a | p a = (s, f a)
+               | otherwise = 
+                let (s', a') = everywhereWithContextLazyBut cat p q s a
+                    (s'', a'') = q a'
+                in (cat s' s'', f a'')
+               
 everywhereWithContextBut :: forall a s. Data a => (s -> s -> s) -> (forall b. Data b => b -> Maybe (s, b)) -> s -> a -> (s, a)
 everywhereWithContextBut cat q s0 =
   gfoldl k (s0,) where
