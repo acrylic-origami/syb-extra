@@ -8,13 +8,15 @@ module Data.Generics.Extra (
   everythingWithContext,
   mkQT,
   extQT,
+  GenericQT,
+  gmapQT,
   everywhereWithContext,
   everywhereWithContextBut,
   everywhereWithContextLazyBut,
   everywhereMBut
 ) where
 import Control.Applicative
-import Control.Arrow ( (***) )
+import Control.Arrow ( (***), first )
 import Data.Data ( cast )
 import Data.Tree
 import Data.Maybe
@@ -36,13 +38,10 @@ everywhereMBut pred f z =
 --   let (next_a, s') = q a
 --   in gmapQ everywhereWithContext cat q -- this is almost trivial but is actually not: need to understand gfoldl to make something that both transforms and returns an accumulating result. It's definitely doable, just have no idea how.
 
-everywhereWithContext :: forall a s. Data a => (s -> s -> s) -> (forall b. Data b => b -> (s, b)) -> s -> a -> (s, a)
-everywhereWithContext cat q s0 =
-  gfoldl k (s0,) where
-    k :: Data c => (s, c -> d) -> c -> (s, d)
-    k (s, f) a =
-      let (s', a') = everywhereWithContext cat q s a
-      in (cat s' *** f) (q a')
+type GenericQT s = forall b. Data b => b -> (s, b)
+
+everywhereWithContext :: (s -> s -> s) -> GenericQT s -> s -> GenericQT s
+everywhereWithContext cat q = everywhereWithContextBut cat (Just . q)
 
 mkQT :: (Data b, Data c, Data (d b), Data (d c)) => (c -> d c) -> (b -> d b) -> c -> d c
 mkQT f0 f c = case cast c of
@@ -56,28 +55,34 @@ extQT :: (Data b, Data c, Data (d b), Data (d c)) =>
 extQT f g a = case cast a of
   Just c -> fromJust $ cast $ g c
   Nothing -> f a
+-- 
+gmapQT ::
+  forall s.
+  GenericQT s ->
+  GenericQT [s]
+gmapQT q =
+  gfoldl k ([],) where
+    k :: Data c => ([s], c -> d) -> c -> ([s], d)
+    k (ss, f) a = ((:ss) *** f) (q a)
 
 everywhereWithContextLazyBut ::
-  forall a s. Data a =>
-    (s -> s -> s) ->
-    GenericQ Bool ->
-    (forall b. Data b => b -> (s, b))
-    -> (s -> a -> (s, a))
-everywhereWithContextLazyBut cat p q s0 =
-  gfoldl k (s0,) where
-    k :: Data c => (s, c -> d) -> c -> (s, d)
-    k (s, f) a | p a = (s, f a)
-               | otherwise = 
-                let (s', a') = everywhereWithContextLazyBut cat p q s a
-                    (s'', a'') = q a'
-                in (cat s' s'', f a'')
+  (s -> s -> s) ->
+  GenericQ Bool ->
+  GenericQT s ->
+  (s -> GenericQT s)
+everywhereWithContextLazyBut cat p q s0 a0 =
+  if p a0
+    then (s0, a0)
+    else
+      let (s, a) = first (foldl cat s0) $ gmapQT (everywhereWithContextLazyBut cat p q s0) a0
+          (s', a') = q a
+      in (cat s s', a')
                
-everywhereWithContextBut :: forall a s. Data a => (s -> s -> s) -> (forall b. Data b => b -> Maybe (s, b)) -> s -> a -> (s, a)
-everywhereWithContextBut cat q s0 =
-  gfoldl k (s0,) where
-    k :: Data c => (s, c -> d) -> c -> (s, d)
-    k (s, f) a | Just (s', a') <- q a = (cat s *** f) $ everywhereWithContextBut cat q s' a'
-               | otherwise = (s, f a)
+everywhereWithContextBut :: (s -> s -> s) -> (forall b. Data b => b -> Maybe (s, b)) -> s -> GenericQT s
+everywhereWithContextBut cat q s0 a0 =
+  case q a0 of
+    Just (s, a) -> first (foldl cat s) $ gmapQT (everywhereWithContextBut cat q s) a
+    Nothing -> (s0, a0)
 
 constr_ppr :: Data d => d -> String
 constr_ppr = everything_ppr (show . toConstr)
